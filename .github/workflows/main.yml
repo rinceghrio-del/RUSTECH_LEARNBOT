@@ -1,0 +1,60 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      # Kung may KEYSTORE_BASE64 + KEYSTORE_PASSWORD secrets sa repo, iyon ang gagamitin.
+      # Kung WALA (bagong repo, wala pang secrets), gagawa ng bagong debug keystore - okay lang
+      # ito dahil bagong applicationId (com.rustech.learnbot) ang app na ito, hindi nito
+      # kailangang tumugma sa signature ng lumang app.
+      - name: Prepare signing keystore
+        env:
+          KS_B64: ${{ secrets.KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KS_B64" ] && [ -n "$KS_PASS" ]; then
+            echo "$KS_B64" | base64 -d > "$GITHUB_WORKSPACE/rustech-debug.keystore"
+            echo "KEYSTORE_PASSWORD=$KS_PASS" >> "$GITHUB_ENV"
+          else
+            keytool -genkeypair -v \
+              -keystore "$GITHUB_WORKSPACE/rustech-debug.keystore" \
+              -alias rustech -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass rustech123 -keypass rustech123 \
+              -dname "CN=Rustech, O=Rustech Net Solutions, C=PH"
+            echo "KEYSTORE_PASSWORD=rustech123" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build debug APK
+        run: gradle assembleDebug
+        env:
+          KEYSTORE_PATH: ${{ github.workspace }}/rustech-debug.keystore
+
+      - name: Upload APK as downloadable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RustechLearn-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
